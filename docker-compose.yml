@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine  # Легкая версия Postgres
+    container_name: expense_tracker_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres     # Логин суперпользователя
+      POSTGRES_PASSWORD: maxlvov13  # Пароль (в проде так нельзя, для локалки ок)
+      POSTGRES_DB: finance_db  # Имя базы данных, создастся автоматически
+    ports:
+      - "5433:5432"            # Проброс порта: localhost:5432 -> контейнер:5432
+    volumes:
+      - pgdata:/var/lib/postgresql/data # Том для хранения данных
+
+volumes:
+  pgdata:                      # Объявление тома

@@ -1,12 +1,22 @@
-// server/routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
+const { authLimiter } = require('../middleware/rateLimiter');
+const { registerValidation, loginValidation } = require('../validators/authValidator');
+const validate = require('../middleware/validate');
 
-// POST /api/auth/register
-router.post('/register', authController.register);
+router.post('/register', 
+    authLimiter, 
+    registerValidation, 
+    validate, 
+    authController.register
+);
 
-// POST /api/auth/login
-router.post('/login', authController.login);
+router.post('/login', 
+    authLimiter, 
+    loginValidation, 
+    validate, 
+    authController.login
+);
 
 module.exports = router;

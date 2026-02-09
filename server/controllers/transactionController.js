@@ -1,25 +1,24 @@
 // server/controllers/transactionController.js
 const db = require('../db/db');
+const asyncHandler = require('../utils/asyncHandler');
+const { NotFoundError, ValidationError } = require('../utils/errors');
+
 
 // Получить транзакции (с пагинацией) -> { items, total, page, limit }
-exports.getAll = async (req, res) => {
-  try {
+exports.getAll = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
-    // filters
-    const from = req.query.from || null;            // string date/iso or null
-    const to = req.query.to || null;                // string date/iso or null
+    const from = req.query.from || null;
+    const to = req.query.to || null;
     const categoryId = req.query.categoryId ? Number(req.query.categoryId) : null;
-    const type = req.query.type || null;            // 'income' | 'expense' | null
+    const type = req.query.type || null;
     const qRaw = (req.query.q || '').trim();
-    const q = qRaw.length ? `%${qRaw}%` : null;     // pattern for ILIKE
+    const q = qRaw.length ? `%${qRaw}%` : null;
 
-    // ВАЖНО: используем один и тот же WHERE для items и total
-    // Паттерн "($param is null OR condition)" — типичный способ делать опциональные фильтры 
     const whereSql = `
       WHERE t.user_id = $1
         AND ($2::timestamptz IS NULL OR t.date >= $2::timestamptz)
@@ -31,7 +30,6 @@ exports.getAll = async (req, res) => {
 
     const paramsBase = [userId, from, to, categoryId, type, q];
 
-    // 1) items
     const itemsQuery = `
       SELECT t.*, c.name as category_name, c.type as category_type
       FROM transactions t
@@ -43,7 +41,6 @@ exports.getAll = async (req, res) => {
     const itemsParams = [...paramsBase, limit, offset];
     const itemsResult = await db.query(itemsQuery, itemsParams);
 
-    // 2) total
     const totalQuery = `
       SELECT COUNT(*)::int AS total
       FROM transactions t
@@ -53,63 +50,56 @@ exports.getAll = async (req, res) => {
     const totalResult = await db.query(totalQuery, paramsBase);
     const total = Number(totalResult.rows[0]?.total ?? 0);
 
-    res.json({ items: itemsResult.rows, total, page, limit });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
-  }
-};
+    res.json({ 
+        success: true,
+        items: itemsResult.rows, 
+        total, 
+        page, 
+        limit,
+        totalPages: Math.ceil(total / limit)
+    });
+});
 
 
 
 // Создать транзакцию
-exports.create = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const { categoryId, amount, date, comment } = req.body;
+exports.create = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { categoryId, amount, date, comment } = req.body;
 
-        if (!categoryId || !amount || !date) {
-            return res.status(400).json({ error: 'All fields are required' });
-        }
+    const query = `
+        INSERT INTO transactions (user_id, category_id, amount, date, comment)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING *
+    `;
 
-        // ВАЖНО: Мы доверяем фронтенду, что categoryId существует.
-        // Если нет - Postgres выкинет ошибку внешнего ключа (foreign key constraint),
-        // которую мы поймаем в catch.
-        
-        const query = `
-            INSERT INTO transactions (user_id, category_id, amount, date, comment)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING *
-        `;
+    const result = await db.query(query, [userId, categoryId, amount, date, comment]);
 
-        const result = await db.query(query, [userId, categoryId, amount, date, comment]);
+    res.status(201).json({
+        success: true,
+        transaction: result.rows[0]
+    });
+});
 
-        res.status(201).json(result.rows[0]);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error (check category id)' });
-    }
-};
 
 // Удалить транзакцию
-exports.delete = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const transactionId = req.params.id;
+exports.delete = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const transactionId = req.params.id;
 
-        const query = 'DELETE FROM transactions WHERE id = $1 AND user_id = $2 RETURNING id';
-        const result = await db.query(query, [transactionId, userId]);
+    const query = 'DELETE FROM transactions WHERE id = $1 AND user_id = $2 RETURNING id';
+    const result = await db.query(query, [transactionId, userId]);
 
-        if (result.rowCount === 0) {
-            return res.status(404).json({ error: 'Transaction not found or access denied' });
-        }
-
-        res.json({ message: 'Transaction deleted' });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
+    if (result.rowCount === 0) {
+        throw new NotFoundError('Transaction not found or you do not have permission to delete it');
     }
-};
+
+    res.json({ 
+        success: true,
+        message: 'Transaction deleted successfully' 
+    });
+});
+
 
 // экспорт в csv
 const { format } = require('fast-csv');

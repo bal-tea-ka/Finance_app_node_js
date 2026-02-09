@@ -2,17 +2,22 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:16-alpine  # Легкая версия Postgres
+    image: postgres:16-alpine
     container_name: expense_tracker_db
     restart: always
     environment:
-      POSTGRES_USER: postgres     # Логин суперпользователя
-      POSTGRES_PASSWORD: maxlvov13  # Пароль (в проде так нельзя, для локалки ок)
-      POSTGRES_DB: finance_db  # Имя базы данных, создастся автоматически
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}  # Берется из .env
+      POSTGRES_DB: ${DB_NAME:-finance_db}
     ports:
-      - "5433:5432"            # Проброс порта: localhost:5432 -> контейнер:5432
+      - "${DB_PORT:-5433}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data # Том для хранения данных
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 volumes:
-  pgdata:                      # Объявление тома
+  pgdata:

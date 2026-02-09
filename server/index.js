@@ -10,6 +10,7 @@ const authRoutes = require('./routes/authRoutes');
 const categoryRoutes = require('./routes/categoryRoutes');
 const transactionRoutes = require('./routes/transactionRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
+const budgetRoutes = require('./routes/budgetRoutes');
 
 // Импорт middleware обработки ошибок
 const { 
@@ -35,6 +36,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/budgets', budgetRoutes);
 
 // Health check
 app.get('/health', async (req, res, next) => {

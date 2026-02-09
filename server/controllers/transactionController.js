@@ -1,6 +1,7 @@
 // server/controllers/transactionController.js
 const db = require('../db/db');
 const asyncHandler = require('../utils/asyncHandler');
+const Budget = require('../models/Budget');
 const { NotFoundError, ValidationError } = require('../utils/errors');
 
 
@@ -74,12 +75,17 @@ exports.create = asyncHandler(async (req, res) => {
     `;
 
     const result = await db.query(query, [userId, categoryId, amount, date, comment]);
+    
+    // Автоматически проверяем бюджеты после создания транзакции
+    const alerts = await Budget.checkBudgets(userId);
 
     res.status(201).json({
         success: true,
-        transaction: result.rows[0]
+        transaction: result.rows[0],
+        budgetAlerts: alerts // Возвращаем новые алерты если есть
     });
 });
+
 
 
 // Удалить транзакцию

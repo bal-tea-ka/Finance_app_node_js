@@ -1,136 +1,148 @@
 // server/controllers/transactionController.js
-const db = require('../db/db');
-const asyncHandler = require('../utils/asyncHandler');
+const Transaction = require('../models/Transaction');
 const Budget = require('../models/Budget');
-const { NotFoundError, ValidationError } = require('../utils/errors');
+const { asyncHandler } = require('../middleware/errorHandler');
+const { format } = require('fast-csv');
+const Cursor = require('pg-cursor');
+const db = require('../db/db');
 
-
-// Получить транзакции (с пагинацией) -> { items, total, page, limit }
+// Получить транзакции (с пагинацией)
 exports.getAll = asyncHandler(async (req, res) => {
     const userId = req.user.id;
 
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const offset = (page - 1) * limit;
+    const filters = {
+        page: req.query.page,
+        limit: req.query.limit,
+        from: req.query.from,
+        to: req.query.to,
+        categoryId: req.query.categoryId,
+        type: req.query.type,
+        q: req.query.q
+    };
 
-    const from = req.query.from || null;
-    const to = req.query.to || null;
-    const categoryId = req.query.categoryId ? Number(req.query.categoryId) : null;
-    const type = req.query.type || null;
-    const qRaw = (req.query.q || '').trim();
-    const q = qRaw.length ? `%${qRaw}%` : null;
+    const result = await Transaction.findAll(userId, filters);
 
-    const whereSql = `
-      WHERE t.user_id = $1
-        AND ($2::timestamptz IS NULL OR t.date >= $2::timestamptz)
-        AND ($3::timestamptz IS NULL OR t.date <  $3::timestamptz)
-        AND ($4::int IS NULL OR t.category_id = $4::int)
-        AND ($5::text IS NULL OR c.type = $5::text)
-        AND ($6::text IS NULL OR t.comment ILIKE $6::text)
-    `;
-
-    const paramsBase = [userId, from, to, categoryId, type, q];
-
-    const itemsQuery = `
-      SELECT t.*, c.name as category_name, c.type as category_type
-      FROM transactions t
-      LEFT JOIN categories c ON t.category_id = c.id
-      ${whereSql}
-      ORDER BY t.date DESC
-      LIMIT $7 OFFSET $8
-    `;
-    const itemsParams = [...paramsBase, limit, offset];
-    const itemsResult = await db.query(itemsQuery, itemsParams);
-
-    const totalQuery = `
-      SELECT COUNT(*)::int AS total
-      FROM transactions t
-      LEFT JOIN categories c ON t.category_id = c.id
-      ${whereSql}
-    `;
-    const totalResult = await db.query(totalQuery, paramsBase);
-    const total = Number(totalResult.rows[0]?.total ?? 0);
-
-    res.json({ 
+    res.json({
         success: true,
-        items: itemsResult.rows, 
-        total, 
-        page, 
-        limit,
-        totalPages: Math.ceil(total / limit)
+        ...result
     });
 });
 
+// Получить одну транзакцию по ID
+exports.getById = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const transactionId = parseInt(req.params.id);
 
+    const transaction = await Transaction.findById(transactionId, userId);
+
+    res.json({
+        success: true,
+        data: transaction
+    });
+});
 
 // Создать транзакцию
 exports.create = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { categoryId, amount, date, comment } = req.body;
 
-    const query = `
-        INSERT INTO transactions (user_id, category_id, amount, date, comment)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING *
-    `;
+    const transaction = await Transaction.create(userId, {
+        categoryId,
+        amount,
+        date,
+        comment
+    });
 
-    const result = await db.query(query, [userId, categoryId, amount, date, comment]);
-    
     // Автоматически проверяем бюджеты после создания транзакции
-    const alerts = await Budget.checkBudgets(userId);
+    let budgetAlerts = [];
+    try {
+        budgetAlerts = await Budget.checkBudgets(userId);
+    } catch (error) {
+        console.error('Failed to check budgets after transaction creation:', error);
+        // Не прерываем выполнение, если проверка бюджетов упала
+    }
 
     res.status(201).json({
         success: true,
-        transaction: result.rows[0],
-        budgetAlerts: alerts // Возвращаем новые алерты если есть
+        message: 'Transaction created successfully',
+        data: transaction,
+        budgetAlerts: budgetAlerts.length > 0 ? budgetAlerts : undefined
     });
 });
 
+// Обновить транзакцию
+exports.update = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const transactionId = parseInt(req.params.id);
+    const { categoryId, amount, date, comment } = req.body;
 
+    const transaction = await Transaction.update(transactionId, userId, {
+        categoryId,
+        amount,
+        date,
+        comment
+    });
+
+    // Проверяем бюджеты после обновления
+    let budgetAlerts = [];
+    try {
+        budgetAlerts = await Budget.checkBudgets(userId);
+    } catch (error) {
+        console.error('Failed to check budgets after transaction update:', error);
+    }
+
+    res.json({
+        success: true,
+        message: 'Transaction updated successfully',
+        data: transaction,
+        budgetAlerts: budgetAlerts.length > 0 ? budgetAlerts : undefined
+    });
+});
 
 // Удалить транзакцию
 exports.delete = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const transactionId = req.params.id;
+    const transactionId = parseInt(req.params.id);
 
-    const query = 'DELETE FROM transactions WHERE id = $1 AND user_id = $2 RETURNING id';
-    const result = await db.query(query, [transactionId, userId]);
+    await Transaction.delete(transactionId, userId);
 
-    if (result.rowCount === 0) {
-        throw new NotFoundError('Transaction not found or you do not have permission to delete it');
-    }
-
-    res.json({ 
+    res.json({
         success: true,
-        message: 'Transaction deleted successfully' 
+        message: 'Transaction deleted successfully'
     });
 });
 
+// Получить статистику по транзакциям
+exports.getStatistics = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
 
-// экспорт в csv
-const { format } = require('fast-csv');
-const Cursor = require('pg-cursor');
+    const filters = {
+        from: req.query.from,
+        to: req.query.to
+    };
 
+    const statistics = await Transaction.getStatistics(userId, filters);
+
+    res.json({
+        success: true,
+        data: statistics
+    });
+});
+
+// Экспорт в CSV
 exports.exportCsv = async (req, res) => {
-    // Нам нужен отдельный клиент из пула для работы с курсором
     const client = await db.pool.connect();
-    
+
     try {
         const userId = req.user.id;
+        const locale = req.query.locale || 'ru-RU';
 
-        // 1. Настраиваем заголовки ответа, чтобы браузер понял: "Это файл для скачивания"
-        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
         res.setHeader('Content-Disposition', 'attachment; filename="transactions.csv"');
 
-        // 2. Создаем CSV поток. Он будет превращать объекты JS в строки CSV
         const csvStream = format({ headers: true });
-        
-        // Связываем поток CSV с ответом (res). 
-        // Всё, что попадет в csvStream, автоматически полетит клиенту.
         csvStream.pipe(res);
 
-        // 3. Создаем запрос с Курсором
-        // Курсор позволяет читать данные порциями, а не все сразу
         const cursor = client.query(new Cursor(`
             SELECT t.date, c.name as category, t.amount, t.comment, c.type
             FROM transactions t
@@ -139,46 +151,42 @@ exports.exportCsv = async (req, res) => {
             ORDER BY t.date DESC
         `, [userId]));
 
-        // 4. Читаем данные порциями по 100 штук
-        // Это рекурсивная функция
         const readChunk = () => {
             cursor.read(100, (err, rows) => {
                 if (err) {
-                    console.error(err);
-                    client.release(); // Освобождаем соединение
-                    return res.status(500).end(); 
+                    console.error('CSV export error:', err);
+                    client.release();
+                    return res.status(500).end();
                 }
 
-                // Если строк 0 - значит, мы дочитали всё до конца
                 if (rows.length === 0) {
-                    csvStream.end(); // Закрываем поток (файл скачается)
-                    client.release(); // Возвращаем клиента в пул
+                    csvStream.end();
+                    client.release();
                     return;
                 }
 
-                // Пишем строки в CSV
                 rows.forEach(row => {
                     csvStream.write({
-                        Дата: new Date(row.date).toLocaleDateString(),
-                        Категория: row.category,
+                        Дата: new Date(row.date).toLocaleDateString(locale),
+                        Категория: row.category || 'Без категории',
                         Тип: row.type === 'income' ? 'Доход' : 'Расход',
                         Сумма: row.amount,
                         Комментарий: row.comment || ''
                     });
                 });
 
-                // Читаем следующую порцию
                 readChunk();
             });
         };
 
-        // Запускаем чтение
         readChunk();
 
     } catch (err) {
-        console.error(err);
-        client.release(); // Не забываем освободить ресурс при ошибке
-        res.status(500).send('Export error');
+        console.error('CSV export error:', err);
+        client.release();
+        res.status(500).json({
+            success: false,
+            message: 'Export failed'
+        });
     }
 };
-

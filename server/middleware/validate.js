@@ -1,22 +1,24 @@
+// server/middleware/validate.js
 const { validationResult } = require('express-validator');
+const { ValidationError } = require('../utils/errors');
 
-const validate = (req, res, next) => {
+/**
+ * Middleware для проверки результатов валидации express-validator
+ */
+const validateRequest = (req, res, next) => {
     const errors = validationResult(req);
     
     if (!errors.isEmpty()) {
-        // Форматируем ошибки в понятный вид
-        const formattedErrors = errors.array().map(error => ({
-            field: error.path,
-            message: error.msg
+        const errorMessages = errors.array().map(err => ({
+            field: err.param,
+            message: err.msg,
+            value: err.value
         }));
         
-        return res.status(400).json({
-            error: 'Validation failed',
-            details: formattedErrors
-        });
+        throw new ValidationError('Request validation failed', errorMessages);
     }
     
     next();
 };
 
-module.exports = validate;
+module.exports = validateRequest;

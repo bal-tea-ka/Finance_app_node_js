@@ -1,101 +1,103 @@
 // server/controllers/analyticsController.js
-const db = require('../db/db');
+const Analytics = require('../models/Analytics');
+const { asyncHandler } = require('../middleware/errorHandler');
 
-// 1. Общая сводка (Баланс, Приход, Расход)
-exports.getSummary = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        
-        // Одним запросом считаем сумму доходов и расходов
-        // CASE WHEN ... THEN ... ELSE 0 END - это аналог if/else внутри SQL
-        const query = `
-            SELECT 
-                SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as total_income,
-                SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as total_expense
-            FROM transactions t
-            LEFT JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = $1
-        `;
+// Получить общую сводку (баланс, приход, расход)
+exports.getSummary = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
 
-        const result = await db.query(query, [userId]);
-        const data = result.rows[0];
+    const filters = {
+        from: req.query.from,
+        to: req.query.to
+    };
 
-        // Превращаем null в 0 (если транзакций нет)
-        const income = parseFloat(data.total_income || 0);
-        const expense = parseFloat(data.total_expense || 0);
+    const summary = await Analytics.getSummary(userId, filters);
 
-        res.json({
-            income,
-            expense,
-            balance: income - expense
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-    }
-};
+    res.json({
+        success: true,
+        data: summary
+    });
+});
 
-// 2. Расходы по категориям (для Pie Chart)
-exports.getCategoryStats = async (req, res) => {
-    try {
-        const userId = req.user.id;
+// Получить статистику по категориям (для круговой диаграммы)
+exports.getCategoryStats = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
 
-        const query = `
-            SELECT c.name, SUM(t.amount) as total
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = $1 AND c.type = 'expense'
-            GROUP BY c.name
-            ORDER BY total DESC
-        `;
+    const filters = {
+        from: req.query.from,
+        to: req.query.to,
+        type: req.query.type || 'expense'
+    };
 
-        const result = await db.query(query, [userId]);
-        
-        // Postgres возвращает SUM как строку (чтобы не потерять точность), 
-        // для JSON фронтенду удобнее числа
-        const formatted = result.rows.map(row => ({
-            name: row.name,
-            total: parseFloat(row.total)
-        }));
+    const stats = await Analytics.getCategoryStats(userId, filters);
 
-        res.json(formatted);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-    }
-};
+    // Рассчитываем процентное соотношение
+    const total = stats.reduce((sum, item) => sum + item.total, 0);
+    const statsWithPercentage = stats.map(item => ({
+        ...item,
+        percentage: total > 0 ? Math.round((item.total / total) * 10000) / 100 : 0
+    }));
 
-// 3. Динамика по дням (для Line Chart)
-exports.getDailyStats = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        
-        // DATE_TRUNC('day', date) отбрасывает время (оставляет только дату 2026-02-03 00:00:00)
-        // TO_CHAR форматирует дату в строку 'YYYY-MM-DD'
-        const query = `
-            SELECT 
-                TO_CHAR(date, 'YYYY-MM-DD') as day,
-                SUM(CASE WHEN c.type = 'income' THEN t.amount ELSE 0 END) as income,
-                SUM(CASE WHEN c.type = 'expense' THEN t.amount ELSE 0 END) as expense
-            FROM transactions t
-            JOIN categories c ON t.category_id = c.id
-            WHERE t.user_id = $1
-            GROUP BY day
-            ORDER BY day ASC
-            LIMIT 30 -- Последние 30 дней с транзакциями
-        `;
+    res.json({
+        success: true,
+        count: statsWithPercentage.length,
+        total,
+        data: statsWithPercentage
+    });
+});
 
-        const result = await db.query(query, [userId]);
-        
-        const formatted = result.rows.map(row => ({
-            date: row.day,
-            income: parseFloat(row.income),
-            expense: parseFloat(row.expense)
-        }));
+// Получить динамику по дням (для линейного графика)
+exports.getDailyStats = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
 
-        res.json(formatted);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Server error' });
-    }
-};
+    const filters = {
+        from: req.query.from,
+        to: req.query.to,
+        limit: req.query.limit
+    };
+
+    const stats = await Analytics.getDailyStats(userId, filters);
+
+    res.json({
+        success: true,
+        count: stats.length,
+        data: stats
+    });
+});
+
+// Получить статистику по месяцам
+exports.getMonthlyStats = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+
+    const filters = {
+        limit: req.query.limit
+    };
+
+    const stats = await Analytics.getMonthlyStats(userId, filters);
+
+    res.json({
+        success: true,
+        count: stats.length,
+        data: stats
+    });
+});
+
+// Получить топ категорий
+exports.getTopCategories = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+
+    const filters = {
+        from: req.query.from,
+        to: req.query.to,
+        type: req.query.type || 'expense',
+        limit: req.query.limit
+    };
+
+    const topCategories = await Analytics.getTopCategories(userId, filters);
+
+    res.json({
+        success: true,
+        count: topCategories.length,
+        data: topCategories
+    });
+});

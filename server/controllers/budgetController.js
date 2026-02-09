@@ -1,98 +1,52 @@
+// server/controllers/budgetController.js
 const Budget = require('../models/Budget');
-const asyncHandler = require('../utils/asyncHandler');
-const { NotFoundError, ConflictError } = require('../utils/errors');
+const { asyncHandler } = require('../middleware/errorHandler');
 
-// Получить все бюджеты пользователя
-exports.getAll = asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    const filters = {
-        isActive: req.query.isActive,
-        period: req.query.period
-    };
-    
+/**
+ * Получить все бюджеты пользователя
+ * GET /api/budgets
+ */
+const getBudgets = asyncHandler(async (req, res) => {
+    const userId = req.user.id; // Предполагается, что authMiddleware добавляет user в req
+    const { isActive, period } = req.query;
+
+    const filters = {};
+    if (isActive !== undefined) filters.isActive = isActive;
+    if (period) filters.period = period;
+
     const budgets = await Budget.findByUserId(userId, filters);
-    
-    // Добавляем информацию о потраченной сумме к каждому бюджету
-    const budgetsWithSpent = await Promise.all(
-        budgets.map(async (budget) => {
-            const spent = await Budget.getSpentAmount(budget.id, userId);
-            const remaining = budget.amount - spent;
-            const percentage = (spent / budget.amount) * 100;
-            
-            return {
-                ...budget,
-                spent: parseFloat(spent.toFixed(2)),
-                remaining: parseFloat(remaining.toFixed(2)),
-                percentage: parseFloat(percentage.toFixed(2)),
-                status: percentage >= 100 ? 'exceeded' : percentage >= 80 ? 'warning' : 'ok'
-            };
-        })
-    );
-    
-    res.json({
+
+    res.status(200).json({
         success: true,
-        budgets: budgetsWithSpent
+        count: budgets.length,
+        data: budgets
     });
 });
 
-// Получить один бюджет
-exports.getOne = asyncHandler(async (req, res) => {
+/**
+ * Получить один бюджет по ID
+ * GET /api/budgets/:id
+ */
+const getBudgetById = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const budgetId = req.params.id;
-    
+    const budgetId = parseInt(req.params.id);
+
     const budget = await Budget.findById(budgetId, userId);
-    
-    if (!budget) {
-        throw new NotFoundError('Budget not found');
-    }
-    
-    const spent = await Budget.getSpentAmount(budgetId, userId);
-    const remaining = budget.amount - spent;
-    const percentage = (spent / budget.amount) * 100;
-    
-    res.json({
+
+    res.status(200).json({
         success: true,
-        budget: {
-            ...budget,
-            spent: parseFloat(spent.toFixed(2)),
-            remaining: parseFloat(remaining.toFixed(2)),
-            percentage: parseFloat(percentage.toFixed(2)),
-            status: percentage >= 100 ? 'exceeded' : percentage >= 80 ? 'warning' : 'ok'
-        }
+        data: budget
     });
 });
 
-// Создать бюджет
-exports.create = asyncHandler(async (req, res) => {
+/**
+ * Создать новый бюджет
+ * POST /api/budgets
+ */
+const createBudget = asyncHandler(async (req, res) => {
     const userId = req.user.id;
     const { categoryId, amount, period, startDate, endDate } = req.body;
-    
-    // Проверяем, что категория принадлежит пользователю
-    const db = require('../db/db');
-    const categoryCheck = await db.query(
-        'SELECT id FROM categories WHERE id = $1 AND user_id = $2',
-        [categoryId, userId]
-    );
-    
-    if (categoryCheck.rows.length === 0) {
-        throw new NotFoundError('Category not found or does not belong to you');
-    }
-    
-    // Проверяем, нет ли уже активного бюджета на эту категорию в этот период
-    const existingBudget = await db.query(
-        `SELECT id FROM budgets 
-         WHERE user_id = $1 
-         AND category_id = $2 
-         AND period = $3 
-         AND start_date = $4 
-         AND is_active = true`,
-        [userId, categoryId, period, startDate]
-    );
-    
-    if (existingBudget.rows.length > 0) {
-        throw new ConflictError('Active budget for this category and period already exists');
-    }
-    
+
     const budget = await Budget.create(userId, {
         categoryId,
         amount,
@@ -100,141 +54,137 @@ exports.create = asyncHandler(async (req, res) => {
         startDate,
         endDate
     });
-    
+
     res.status(201).json({
         success: true,
-        budget
+        message: 'Budget created successfully',
+        data: budget
     });
 });
 
-// Обновить бюджет
-exports.update = asyncHandler(async (req, res) => {
+/**
+ * Обновить бюджет
+ * PUT /api/budgets/:id
+ */
+const updateBudget = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const budgetId = req.params.id;
+    const budgetId = parseInt(req.params.id);
     const { amount, period, startDate, endDate, isActive } = req.body;
-    
-    const existingBudget = await Budget.findById(budgetId, userId);
-    
-    if (!existingBudget) {
-        throw new NotFoundError('Budget not found');
-    }
-    
-    const updatedBudget = await Budget.update(budgetId, userId, {
+
+    const budget = await Budget.update(budgetId, userId, {
         amount,
         period,
         startDate,
         endDate,
         isActive
     });
-    
-    res.json({
+
+    res.status(200).json({
         success: true,
-        budget: updatedBudget
+        message: 'Budget updated successfully',
+        data: budget
     });
 });
 
-// Удалить бюджет
-exports.delete = asyncHandler(async (req, res) => {
+/**
+ * Удалить бюджет
+ * DELETE /api/budgets/:id
+ */
+const deleteBudget = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const budgetId = req.params.id;
-    
-    const deleted = await Budget.delete(budgetId, userId);
-    
-    if (!deleted) {
-        throw new NotFoundError('Budget not found');
-    }
-    
-    res.json({
+    const budgetId = parseInt(req.params.id);
+
+    await Budget.delete(budgetId, userId);
+
+    res.status(200).json({
         success: true,
         message: 'Budget deleted successfully'
     });
 });
 
-// Получить статус всех бюджетов (сводка)
-exports.getStatus = asyncHandler(async (req, res) => {
+/**
+ * Получить статистику по бюджету (потраченная сумма)
+ * GET /api/budgets/:id/spent
+ */
+const getBudgetSpent = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    
-    const budgets = await Budget.findByUserId(userId, { isActive: true });
-    
-    let totalBudget = 0;
-    let totalSpent = 0;
-    let exceededCount = 0;
-    let warningCount = 0;
-    
-    const statusDetails = await Promise.all(
-        budgets.map(async (budget) => {
-            const spent = await Budget.getSpentAmount(budget.id, userId);
-            const percentage = (spent / budget.amount) * 100;
-            
-            totalBudget += parseFloat(budget.amount);
-            totalSpent += spent;
-            
-            if (percentage >= 100) exceededCount++;
-            else if (percentage >= 80) warningCount++;
-            
-            return {
-                budgetId: budget.id,
-                categoryName: budget.category_name,
-                amount: parseFloat(budget.amount),
-                spent: parseFloat(spent.toFixed(2)),
-                percentage: parseFloat(percentage.toFixed(2))
-            };
-        })
-    );
-    
-    res.json({
+    const budgetId = parseInt(req.params.id);
+
+    const budget = await Budget.findById(budgetId, userId);
+    const spent = await Budget.getSpentAmount(budgetId, userId);
+    const percentage = (spent / budget.amount) * 100;
+
+    res.status(200).json({
         success: true,
-        summary: {
-            totalBudgets: budgets.length,
-            totalBudget: parseFloat(totalBudget.toFixed(2)),
-            totalSpent: parseFloat(totalSpent.toFixed(2)),
-            exceededCount,
-            warningCount,
-            okCount: budgets.length - exceededCount - warningCount
-        },
-        budgets: statusDetails
+        data: {
+            budgetId: budget.id,
+            budgetAmount: budget.amount,
+            spent,
+            remaining: budget.amount - spent,
+            percentage: Math.round(percentage * 100) / 100,
+            status: percentage >= 100 ? 'exceeded' : percentage >= 80 ? 'warning' : 'ok'
+        }
     });
 });
 
-// Получить уведомления о бюджетах
-exports.getAlerts = asyncHandler(async (req, res) => {
+/**
+ * Получить непрочитанные алерты
+ * GET /api/budgets/alerts/unread
+ */
+const getUnreadAlerts = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    
+
     const alerts = await Budget.getUnreadAlerts(userId);
-    
-    res.json({
+
+    res.status(200).json({
         success: true,
-        alerts
+        count: alerts.length,
+        data: alerts
     });
 });
 
-// Отметить уведомление как прочитанное
-exports.markAlertAsRead = asyncHandler(async (req, res) => {
+/**
+ * Отметить алерт как прочитанный
+ * PATCH /api/budgets/alerts/:alertId/read
+ */
+const markAlertAsRead = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const alertId = req.params.alertId;
-    
+    const alertId = parseInt(req.params.alertId);
+
     const alert = await Budget.markAlertAsRead(alertId, userId);
-    
-    if (!alert) {
-        throw new NotFoundError('Alert not found');
-    }
-    
-    res.json({
+
+    res.status(200).json({
         success: true,
-        alert
+        message: 'Alert marked as read',
+        data: alert
     });
 });
 
-// Проверить все бюджеты и создать алерты
-exports.checkBudgets = asyncHandler(async (req, res) => {
+/**
+ * Проверить все бюджеты пользователя
+ * POST /api/budgets/check
+ */
+const checkBudgets = asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    
+
     const alerts = await Budget.checkBudgets(userId);
-    
-    res.json({
+
+    res.status(200).json({
         success: true,
         message: 'Budgets checked successfully',
-        newAlerts: alerts.length,
-        alerts
+        alertsCreated: alerts.length,
+        data: alerts
     });
 });
+
+module.exports = {
+    getBudgets,
+    getBudgetById,
+    createBudget,
+    updateBudget,
+    deleteBudget,
+    getBudgetSpent,
+    getUnreadAlerts,
+    markAlertAsRead,
+    checkBudgets
+};

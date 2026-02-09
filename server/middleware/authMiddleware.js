@@ -1,6 +1,6 @@
 // server/middleware/authMiddleware.js
 const jwt = require('jsonwebtoken');
-require('dotenv').config();
+const { UnauthorizedError } = require('../utils/errors');
 
 module.exports = function (req, res, next) {
     // 1. Достаем токен из заголовка
@@ -9,14 +9,14 @@ module.exports = function (req, res, next) {
     
     // Если заголовка нет вообще
     if (!authHeader) {
-        return res.status(401).json({ error: 'Access denied. No token provided.' });
+        throw new UnauthorizedError('Access denied. No token provided.');
     }
 
-    // Отрезаем слово "Bearer " (первые 7 символов)
-    const token = authHeader.replace('Bearer ', '');
+    // Отрезаем слово "Bearer " (более безопасно через substring)
+    const token = authHeader.startsWith('Bearer ') ? authHeader.substring(7) : authHeader;
 
     if (!token) {
-        return res.status(401).json({ error: 'Access denied. Token is empty.' });
+        throw new UnauthorizedError('Access denied. Token is empty.');
     }
 
     try {
@@ -30,6 +30,12 @@ module.exports = function (req, res, next) {
         // Пропускаем запрос дальше
         next();
     } catch (err) {
-        res.status(403).json({ error: 'Invalid token.' });
+        if (err.name === 'JsonWebTokenError') {
+            throw new UnauthorizedError('Invalid token.');
+        } else if (err.name === 'TokenExpiredError') {
+            throw new UnauthorizedError('Token expired.');
+        } else {
+            throw new UnauthorizedError('Authentication failed.');
+        }
     }
 };

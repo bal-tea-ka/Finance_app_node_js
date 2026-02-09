@@ -1,3 +1,4 @@
+// server/index.js
 const express = require('express');
 const cors = require('cors');
 const db = require('./db/db');
@@ -27,8 +28,12 @@ unhandledRejectionHandler();
 uncaughtExceptionHandler();
 
 // Middleware
+app.use(helmet());
 app.use(express.json());
-app.use(cors());
+//app.use(cors({
+//    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+//    credentials: true
+//}));
 app.use(generalLimiter);
 
 // Роуты
@@ -43,12 +48,13 @@ app.get('/health', async (req, res, next) => {
     try {
         const result = await db.query('SELECT NOW() as current_time');
         res.json({
+            success: true,
             status: 'OK',
             message: 'Database connection successful',
             time: result.rows[0].current_time
         });
     } catch (err) {
-        next(err); // Передаем ошибку в обработчик
+        next(err);
     }
 });
 
@@ -59,7 +65,38 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
+
+// Graceful shutdown
+const server = app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+
+// Обработка сигналов завершения
+process.on('SIGTERM', () => {
+    console.log('SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+        console.log('HTTP server closed');
+        db.pool.end(() => {
+            console.log('Database pool closed');
+            process.exit(0);
+        });
+    });
+});
+
+process.on('SIGINT', () => {
+    console.log('SIGINT signal received: closing HTTP server');
+    server.close(() => {
+        db.pool.end(() => {
+            console.log('Database pool closed');
+            process.exit(0);
+        });
+    });
+})
+
+if (!process.env.JWT_SECRET) {
+    console.error('JWT_SECRET is required');
+    process.exit(1);
+}
+
+module.exports = app; // Для тестирования

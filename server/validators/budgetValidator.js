@@ -87,9 +87,58 @@ const budgetIdValidation = [
         .withMessage('Valid budget ID is required')
 ];
 
+// Добавьте эти валидаторы в существующий файл budgetValidator.js
+
+const alertIdValidation = [
+    param('alertId')
+        .isInt({ min: 1 })
+        .withMessage('Valid alert ID is required')
+];
+
+// Валидация фильтров для получения бюджетов (улучшенная версия)
+const enhancedGetBudgetsValidation = [
+    query('isActive')
+        .optional()
+        .isBoolean()
+        .withMessage('isActive must be a boolean')
+        .toBoolean(),
+    
+    query('period')
+        .optional()
+        .isIn(['daily', 'weekly', 'monthly', 'yearly'])
+        .withMessage('Period must be one of: daily, weekly, monthly, yearly'),
+    
+    query('page')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Page must be a positive integer')
+        .toInt(),
+    
+    query('limit')
+        .optional()
+        .isInt({ min: 1, max: 100 })
+        .withMessage('Limit must be between 1 and 100')
+        .toInt()
+];
+
+
+const getAlertsValidation = [
+    query('unread')
+        .optional()
+        .isBoolean()
+        .withMessage('Unread must be a boolean')
+        .toBoolean()
+];
+
+
 module.exports = {
     createBudgetValidation,
     updateBudgetValidation,
     getBudgetsValidation,
-    budgetIdValidation
+    budgetIdValidation,
+    alertIdValidation,
+    enhancedGetBudgetsValidation,
+    getAlertsValidation
 };
+
+

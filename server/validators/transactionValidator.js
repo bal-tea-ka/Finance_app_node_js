@@ -1,4 +1,5 @@
-const { body, query } = require('express-validator');
+// server/validators/transactionValidator.js
+const { body, param, query } = require('express-validator');
 
 const createTransactionValidation = [
     body('categoryId')
@@ -7,53 +8,99 @@ const createTransactionValidation = [
     
     body('amount')
         .isFloat({ min: 0.01, max: 999999999.99 })
-        .withMessage('Amount must be a positive number less than 1 billion'),
+        .withMessage('Amount must be a positive number between 0.01 and 999999999.99'),
     
     body('date')
         .isISO8601()
-        .withMessage('Please provide a valid date in ISO 8601 format')
+        .withMessage('Date must be in ISO 8601 format (YYYY-MM-DDTHH:mm:ssZ)')
         .toDate(),
     
     body('comment')
         .optional()
-        .trim()
         .isLength({ max: 500 })
-        .withMessage('Comment cannot exceed 500 characters')
+        .withMessage('Comment must not exceed 500 characters')
+        .trim()
+        .escape()
 ];
 
+// Для PUT/PATCH - все поля optional
+const updateTransactionValidation = [
+    param('id')
+        .isInt({ min: 1 })
+        .withMessage('Valid transaction ID is required'),
+    
+    body('categoryId')
+        .optional()
+        .isInt({ min: 1 })
+        .withMessage('Valid category ID is required'),
+    
+    body('amount')
+        .optional()
+        .isFloat({ min: 0.01, max: 999999999.99 })
+        .withMessage('Amount must be a positive number between 0.01 and 999999999.99'),
+    
+    body('date')
+        .optional()
+        .isISO8601()
+        .withMessage('Date must be in ISO 8601 format')
+        .toDate(),
+    
+    body('comment')
+        .optional()
+        .isLength({ max: 500 })
+        .withMessage('Comment must not exceed 500 characters')
+        .trim()
+        .escape()
+];
+
+// Валидация для фильтров GET /transactions
 const getTransactionsValidation = [
     query('page')
         .optional()
         .isInt({ min: 1 })
-        .withMessage('Page must be a positive integer'),
+        .withMessage('Page must be a positive integer')
+        .toInt(),
     
     query('limit')
         .optional()
         .isInt({ min: 1, max: 100 })
-        .withMessage('Limit must be between 1 and 100'),
-    
-    query('from')
-        .optional()
-        .isISO8601()
-        .withMessage('From date must be in ISO 8601 format'),
-    
-    query('to')
-        .optional()
-        .isISO8601()
-        .withMessage('To date must be in ISO 8601 format'),
+        .withMessage('Limit must be between 1 and 100')
+        .toInt(),
     
     query('categoryId')
         .optional()
         .isInt({ min: 1 })
-        .withMessage('Category ID must be a positive integer'),
+        .withMessage('Category ID must be a positive integer')
+        .toInt(),
     
-    query('type')
+    query('from', 'Invalid from date')
         .optional()
-        .isIn(['income', 'expense'])
-        .withMessage('Type must be either "income" or "expense"')
+        .isISO8601()
+        .toDate(),
+    
+    query('to', 'Invalid to date')
+        .optional()
+        .isISO8601()
+        .toDate()
+        .custom((to, { req }) => {
+            if (req.query.from && to) {
+                if (new Date(to) <= new Date(req.query.from)) {
+                    throw new Error('"to" date must be after "from" date');
+                }
+            }
+            return true;
+        })
+];
+
+const transactionIdValidation = [
+    param('id')
+        .isInt({ min: 1 })
+        .withMessage('Valid transaction ID is required')
 ];
 
 module.exports = {
     createTransactionValidation,
-    getTransactionsValidation
+    updateTransactionValidation,
+    getTransactionsValidation,
+    transactionIdValidation
 };

@@ -1,20 +1,54 @@
-const { body } = require('express-validator');
+// server/validators/categoryValidator.js
+const { body, param, query } = require('express-validator');
 
 const createCategoryValidation = [
     body('name')
-        .trim()
         .notEmpty()
         .withMessage('Category name is required')
-        .isLength({ min: 2, max: 50 })
-        .withMessage('Category name must be between 2 and 50 characters'),
+        .isLength({ min: 1, max: 100 })
+        .withMessage('Category name must be between 1 and 100 characters')
+        .trim()
+        .escape(),
     
     body('type')
-        .notEmpty()
-        .withMessage('Category type is required')
         .isIn(['income', 'expense'])
-        .withMessage('Type must be either "income" or "expense"')
+        .withMessage('Type must be "income" or "expense"')
+];
+
+const updateCategoryValidation = [
+    param('id')
+        .isInt({ min: 1 })
+        .withMessage('Valid category ID is required'),
+    
+    body('name')
+        .optional()
+        .isLength({ min: 1, max: 100 })
+        .withMessage('Category name must be between 1 and 100 characters')
+        .trim()
+        .escape(),
+    
+    body('type')
+        .optional()
+        .isIn(['income', 'expense'])
+        .withMessage('Type must be "income" or "expense"')
+];
+
+const categoryIdValidation = [
+    param('id')
+        .isInt({ min: 1 })
+        .withMessage('Valid category ID is required')
+];
+
+const getCategoriesValidation = [
+    query('type')
+        .optional()
+        .isIn(['income', 'expense'])
+        .withMessage('Type must be "income" or "expense"')
 ];
 
 module.exports = {
-    createCategoryValidation
+    createCategoryValidation,
+    updateCategoryValidation,
+    categoryIdValidation,
+    getCategoriesValidation
 };

@@ -12,7 +12,7 @@ const generalLimiter = rateLimit({
 // Строгий лимитер для аутентификации
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 минут
-    max: 5, // Максимум 5 попыток логина
+    max: 500, // Максимум 5 попыток логина
     message: { error: 'Too many login attempts, please try again after 15 minutes.' },
     skipSuccessfulRequests: true, // Не считает успешные запросы
 });

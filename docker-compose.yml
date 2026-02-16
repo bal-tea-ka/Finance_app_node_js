@@ -10,7 +10,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}  # Берется из .env
       POSTGRES_DB: ${DB_NAME:-finance_db}
     ports:
-      - "${DB_PORT:-5433}:5432"
+      - "${DB_PORT:-5431}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

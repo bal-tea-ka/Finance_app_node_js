@@ -99,3 +99,79 @@ exports.getDailyStats = async (req, res) => {
         res.status(500).json({ error: 'Server error' });
     }
 };
+
+// 4. Анализ бюджета (Budget vs Actual)
+exports.getBudgetAnalysis = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        
+        // Получаем бюджеты
+        const budgetsQuery = `
+            SELECT b.*, c.name as category_name 
+            FROM budgets b
+            JOIN categories c ON b.category_id = c.id
+            WHERE b.user_id = $1
+        `;
+        const budgetsResult = await db.query(budgetsQuery, [userId]);
+        const budgets = budgetsResult.rows;
+
+        // Если бюджетов нет, возвращаем пусто
+        if (budgets.length === 0) {
+            return res.json({
+                total_budget: 0,
+                total_spent: 0,
+                status: 'no_budgets',
+                details: []
+            });
+        }
+
+        // Считаем расходы за текущий месяц для категорий с бюджетом
+        const currentDate = new Date();
+        const startOfMonth = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
+
+        const spentQuery = `
+            SELECT category_id, SUM(amount) as spent
+            FROM transactions
+            WHERE user_id = $1 
+              AND date >= $2
+              AND category_id = ANY($3)
+            GROUP BY category_id
+        `;
+        const categoryIds = budgets.map(b => b.category_id);
+        const spentResult = await db.query(spentQuery, [userId, startOfMonth, categoryIds]);
+        
+        const spentMap = {};
+        spentResult.rows.forEach(row => {
+            spentMap[row.category_id] = parseFloat(row.spent);
+        });
+
+        let totalBudget = 0;
+        let totalSpent = 0;
+        const details = budgets.map(budget => {
+            const spent = spentMap[budget.category_id] || 0;
+            const amount = parseFloat(budget.amount);
+            
+            totalBudget += amount;
+            totalSpent += spent;
+
+            return {
+                category: budget.category_name,
+                budget: amount,
+                spent: spent,
+                remaining: amount - spent,
+                percent: amount > 0 ? (spent / amount) * 100 : 0
+            };
+        });
+
+        res.json({
+            total_budget: totalBudget,
+            total_spent: totalSpent,
+            status: totalSpent > totalBudget ? 'over_budget' : 'ok',
+            details
+        });
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Server error' });
+    }
+};
